@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocChat</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --brand:#1e40af; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { margin: 0 0 4px; font-size: 26px; } .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input[type=text], select { flex:1; min-width: 180px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  button { padding:10px 16px; border:0; border-radius:8px; background:var(--brand); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:wait; }
+  .docs { list-style:none; padding:0; margin:12px 0 0; } .docs li { padding:6px 0; border-top:1px solid var(--line); font-size:14px; color:var(--muted); }
+  .docs b { color: var(--ink); }
+  .answer { white-space: pre-wrap; line-height: 1.55; }
+  .src { font-size: 13px; color: var(--muted); border-left: 3px solid var(--line); padding: 6px 10px; margin-top: 8px; }
+  .src b { color: var(--ink); }
+  .status { font-size: 13px; color: var(--muted); margin-top: 8px; min-height: 1em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>DocChat</h1>
+  <p class="sub">Upload a PDF, then ask questions. Answers come only from your documents, with sources.</p>
+
+  <section class="card">
+    <form id="upload" class="row">
+      <input type="file" id="file" accept="application/pdf" required>
+      <button type="submit">Upload PDF</button>
+    </form>
+    <div class="status" id="uploadStatus"></div>
+    <ul class="docs" id="docs"></ul>
+  </section>
+
+  <section class="card">
+    <form id="ask" class="row">
+      <input type="text" id="question" placeholder="Ask something about your documents…" required>
+      <select id="scope"><option value="">All documents</option></select>
+      <button type="submit">Ask</button>
+    </form>
+    <div class="status" id="askStatus"></div>
+    <div id="result"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+async function loadDocs() {
+  const docs = await (await fetch('/api/documents')).json();
+  $('docs').innerHTML = docs.map((d) => `<li><b>${esc(d.title)}</b> · ${d.pages} pages · ${d.chunkCount} chunks</li>`).join('') || '<li>No documents yet.</li>';
+  $('scope').innerHTML = '<option value="">All documents</option>' + docs.map((d) => `<option value="${d.id}">${esc(d.title)}</option>`).join('');
+}
+
+$('upload').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.submitter; btn.disabled = true; $('uploadStatus').textContent = 'Reading and indexing…';
+  const body = new FormData(); body.append('file', $('file').files[0]);
+  const res = await fetch('/api/documents', { method: 'POST', body });
+  const data = await res.json();
+  $('uploadStatus').textContent = res.ok ? `Indexed "${data.title}" (${data.chunkCount} chunks).` : (data.message || 'Upload failed');
+  btn.disabled = false; e.target.reset(); loadDocs();
+});
+
+$('ask').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.submitter; btn.disabled = true; $('askStatus').textContent = 'Thinking…'; $('result').innerHTML = '';
+  const payload = { question: $('question').value };
+  if ($('scope').value) payload.documentId = $('scope').value;
+  const res = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) { $('askStatus').textContent = [].concat(data.message).join(', '); btn.disabled = false; return; }
+  $('askStatus').textContent = `${data.sources.length} sources · ${data.tookMs} ms`;
+  $('result').innerHTML = `<div class="answer">${esc(data.answer)}</div>` +
+    data.sources.map((s) => `<div class="src"><b>[${s.ref}] ${esc(s.title)}, part ${s.part}</b> · score ${s.score}<br>${esc(s.snippet)}</div>`).join('');
+  btn.disabled = false;
+});
+
+loadDocs();
+</script>
+</body>
+</html>
