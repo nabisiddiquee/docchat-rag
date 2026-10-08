@@ -1,0 +1,30 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [vector]
+}
+
+model Document {
+  id         String   @id @default(uuid())
+  title      String
+  fileName   String
+  pages      Int
+  chunkCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  chunks     Chunk[]
+}
+
+model Chunk {
+  id         String                       @id @default(uuid())
+  document   Document                     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId String
+  index      Int
+  content    String
+  embedding  Unsupported("vector(1536)")?
+
+  @@unique([documentId, index])
+}
